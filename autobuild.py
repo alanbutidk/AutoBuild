@@ -496,7 +496,7 @@ if __name__ == "__main__":
     cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.", Exit=True)
     # Handle version before parsing .abuild
     if cli.IsArgInActualArgs("--version") or cli.IsArgInActualArgs("-v"):
-        raise SystemExit("AutoBuild v1.0.0\n")
+        raise SystemExit("AutoBuild v1.0.1\n")
     # Handle help before parsing .abuild
     if cli.IsArgInActualArgs("--help") or cli.IsArgInActualArgs("-h"):
         # Register help and version only, no recipes yet
