@@ -21,7 +21,7 @@ let CFLAGS = -Wall -O2 -g
 let PROGRAM = Test
 
 # OS detection
-if OS==nt then
+if OS==Windows_NT then
   let executable = .exe
   let RM = del /f
 elif OS==linux then
@@ -70,7 +70,10 @@ repeat:
 
 ```
 
-Now to use the ```compile``` recipe: ```autobuild compile```
+Now to use the ```compile``` recipe: ```autobuild compile``` and yes, it is Windows_NT for windows systems.
+
+> Note to linux users: The OS Variable isnt defined in the OS, so
+just run ```OS=linux``` or ```env OS=linux``` in order for it to work.
 
 ---
 
