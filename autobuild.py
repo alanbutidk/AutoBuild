@@ -490,39 +490,35 @@ class Executor:
 		print(f"[AutoBuild] Running recipe: {name}")
 		self._execute(node.data["body"])
 if __name__ == "__main__":
-	from arghandle import ArgHandle
-	cli = ArgHandle()
-	cli.ProgramName("AutoBuild")
-
-	cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.", Exit=True)
-
-	# Handle version before parsing .abuild
-	if cli.IsArgInActualArgs("--version") or cli.IsArgInActualArgs("-v"):
-		raise SystemExit("AutoBuild v1.0.0\n")
-
-	# Handle help before parsing .abuild
-	if cli.IsArgInActualArgs("--help") or cli.IsArgInActualArgs("-h"):
-		# Register help and version only, no recipes yet
-		cli.RegisterToHelp("version", ["--version", "-v"], HelpMsg="Prints the version and exit")
-		cli.HandleHelp()
-
-	# Only now load and parse .abuild
-	if not __import__("pathlib").Path(".abuild").exists():
-		raise SystemExit("[AutoBuild] No .abuild file found in current directory.\n")
-	try:
-		source = open(".abuild").read()
-		tokens = Tokenize(source).GetTokens()
-		ast = Parser(tokens).GetAST()
-		executor = Executor(ast)
-		#print(f"[DEBUG]: Recipes declared; {executor.recipes_declared}")
-	except Exception as e:
-		raise SystemExit(f"Error while running file: {e}\n")
-	# Match and run recipe
-	arg = sys.argv[1] if len(sys.argv) > 1 else None
-	try:
-		if arg and arg in executor.recipes_declared:
-			executor.RunRecipe(arg)
-		else:
-			raise SystemExit(f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n")
-	except Exception as e:
-		raise SystemExit(f"Error while running file: {e}\n")
+    from arghandle import ArgHandle
+    cli = ArgHandle()
+    cli.ProgramName("AutoBuild")
+    cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.", Exit=True)
+    # Handle version before parsing .abuild
+    if cli.IsArgInActualArgs("--version") or cli.IsArgInActualArgs("-v"):
+        raise SystemExit("AutoBuild v1.0.0\n")
+    # Handle help before parsing .abuild
+    if cli.IsArgInActualArgs("--help") or cli.IsArgInActualArgs("-h"):
+        # Register help and version only, no recipes yet
+        cli.RegisterArg(["--version", "-v"], HelpMsg="Prints the version and exit")
+        cli.HandleHelp()
+    # Only now load and parse .abuild
+    if not __import__("pathlib").Path(".abuild").exists():
+        raise SystemExit("[AutoBuild] No .abuild file found in current directory.\n")
+    try:
+        source = open(".abuild").read()
+        tokens = Tokenize(source).GetTokens()
+        ast = Parser(tokens).GetAST()
+        executor = Executor(ast)
+        #print(f"[DEBUG]: Recipes declared; {executor.recipes_declared}")
+    except Exception as e:
+        raise SystemExit(f"Error while running file: {e}\n")
+    # Match and run recipe
+    arg = cli.SetVariableToIndex(1)
+    try:
+        if arg and arg in executor.recipes_declared:
+            executor.RunRecipe(arg)
+        else:
+            raise SystemExit(f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n")
+    except Exception as e:
+        raise SystemExit(f"Error while running file: {e}\n")
