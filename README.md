@@ -4,6 +4,9 @@ Unlike _Make_ with its .PHONY systems. AutoBuild handles all of that.
 
 Just define your recipes and add the logic to them and now you can run them.
 
+Autobuild files are written in the .abuild format.
+It was written with APIs in mind, so Tokenize, Parse, Executor()!
+
 ---
 
 ### A Simple Code Example
@@ -72,8 +75,6 @@ repeat:
 
 Now to use the ```compile``` recipe: ```autobuild compile``` and yes, it is Windows_NT for windows systems.
 
-> Note to linux users: The OS Variable isnt defined in the OS, so
-just run ```OS=linux``` or ```env OS=linux``` in order for it to work.
 
 ---
 

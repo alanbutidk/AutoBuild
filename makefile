@@ -4,7 +4,7 @@ else
 	PYNAME := python3
 endif
 CC := -m nuitka
-CFLAGS := --onefile \
+PYFLAGS := --onefile \
 		  --standalone \
 		  --remove-output \
 		  --no-pyi-file \
@@ -66,7 +66,7 @@ endif
 all: build
 
 build:
-	$(PYNAME) $(CC) $(CFLAGS) --output-filename=$(TARGET)$(executable) autobuild.py
+	$(PYNAME) $(CC) $(PYFLAGS) --output-filename=$(TARGET)$(executable) autobuild.py
 
 clean:
 	$(RM) $(TARGET)$(executable) *.o *.pyi

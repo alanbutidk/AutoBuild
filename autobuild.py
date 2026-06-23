@@ -90,12 +90,20 @@ class Tokenize:
 				var_name = stripped[4:].strip()
 				val = os.environ.get(var_name)
 				if val is None:
-					print(f"WARNING: Environmental variable [{var_name}] is not on the runner PC")
-					self.tokens.append(Token(_TokenType.GET, var_name, self.line))
-					self.tokens.append(Token(_TokenType.NULL, "NULL", self.line))
-				else:
-					self.tokens.append(Token(_TokenType.GET, var_name, self.line))
-					self.tokens.append(Token(_TokenType.IDENTIFIER, val, self.line))
+					syst = __import__("platform").system()
+					if var_name == "OS":
+						if syst == "Linux":
+							val = "linux"
+						elif syst == "Darwin":
+							val = "darwin"
+						else:
+							print(f"WARNING: Environmental variable [{var_name}] is not on the runner PC")
+							val = "NULL"
+					else:
+						print(f"WARNING: Environmental variable [{var_name}] is not on the runner PC")
+						val = "NULL"
+				self.tokens.append(Token(_TokenType.GET, var_name, self.line))
+				self.tokens.append(Token(_TokenType.IDENTIFIER, val, self.line))
 
 			# let
 			elif stripped.startswith("let "):
@@ -224,6 +232,7 @@ class Parser:
 			t = self._advance()
 			parts.append((t.type.name, t.value))
 		return parts
+
 	def _parse_body(self, inside_block=False) -> list:
 		"""Reads indented body lines until DONE/ELIF/ELSE (inside block) or RECIPE_DEF/RECIPE/EOF (top level)."""
 		body = []
@@ -359,6 +368,7 @@ class Parser:
 
 	def GetAST(self) -> list:
 		return self.ast
+
 class Executor:
 	"""Walks the AST produced by Parser and executes each node."""
 	def __init__(self, ast: list):
@@ -441,7 +451,6 @@ class Executor:
 			for branch in node.data["branches"]:
 				condition = branch["condition"]
 				if condition is None:
-					# else branch
 					self._execute(branch["body"])
 					break
 				left, op, right = condition
@@ -489,36 +498,37 @@ class Executor:
 			self.RunRecipe(dep)
 		print(f"[AutoBuild] Running recipe: {name}")
 		self._execute(node.data["body"])
+
 if __name__ == "__main__":
-    from arghandle import ArgHandle
-    cli = ArgHandle()
-    cli.ProgramName("AutoBuild")
-    cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.", Exit=True)
-    # Handle version before parsing .abuild
-    if cli.IsArgInActualArgs("--version") or cli.IsArgInActualArgs("-v"):
-        raise SystemExit("AutoBuild v1.0.1\n")
-    # Handle help before parsing .abuild
-    if cli.IsArgInActualArgs("--help") or cli.IsArgInActualArgs("-h"):
-        # Register help and version only, no recipes yet
-        cli.RegisterArg(["--version", "-v"], HelpMsg="Prints the version and exit")
-        cli.HandleHelp()
-    # Only now load and parse .abuild
-    if not __import__("pathlib").Path(".abuild").exists():
-        raise SystemExit("[AutoBuild] No .abuild file found in current directory.\n")
-    try:
-        source = open(".abuild").read()
-        tokens = Tokenize(source).GetTokens()
-        ast = Parser(tokens).GetAST()
-        executor = Executor(ast)
-        #print(f"[DEBUG]: Recipes declared; {executor.recipes_declared}")
-    except Exception as e:
-        raise SystemExit(f"Error while running file: {e}\n")
-    # Match and run recipe
-    arg = cli.SetVariableToIndex(1)
-    try:
-        if arg and arg in executor.recipes_declared:
-            executor.RunRecipe(arg)
-        else:
-            raise SystemExit(f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n")
-    except Exception as e:
-        raise SystemExit(f"Error while running file: {e}\n")
+	from arghandle import ArgHandle
+	cli = ArgHandle()
+	cli.ProgramName("AutoBuild")
+	cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.", Exit=True)
+	# Handle version before parsing .abuild
+	if cli.IsArgInActualArgs("--version") or cli.IsArgInActualArgs("-v"):
+		raise SystemExit("AutoBuild v1.0.1\n")
+	# Handle help before parsing .abuild
+	if cli.IsArgInActualArgs("--help") or cli.IsArgInActualArgs("-h"):
+		# Register help and version only, no recipes yet
+		cli.RegisterArg(["--version", "-v"], HelpMsg="Prints the version and exit")
+		cli.HandleHelp()
+	# Only now load and parse .abuild
+	if not __import__("pathlib").Path(".abuild").exists():
+		raise SystemExit("[AutoBuild] No .abuild file found in current directory.\n")
+	try:
+		source = open(".abuild").read()
+		tokens = Tokenize(source).GetTokens()
+		ast = Parser(tokens).GetAST()
+		executor = Executor(ast)
+		#print(f"[DEBUG]: Recipes declared; {executor.recipes_declared}")
+	except Exception as e:
+		raise SystemExit(f"Error while running file: {e}\n")
+	# Match and run recipe
+	arg = cli.SetVariableToIndex(1)
+	try:
+		if arg and arg in executor.recipes_declared:
+			executor.RunRecipe(arg)
+		else:
+			raise SystemExit(f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n")
+	except Exception as e:
+		raise SystemExit(f"Error while running file: {e}\n")
