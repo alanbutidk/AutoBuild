@@ -1,4 +1,9 @@
-
+# venv for testing.
+.venv
+# Release-private folders.
+Release\
+# General .abuilds left for comparision when building autobuild.
 .abuild
-__pycache__/
-Release/
+# if not deleted.
+*.exe
+*.c
