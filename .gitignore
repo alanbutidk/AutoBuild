@@ -1,7 +1,7 @@
 # venv for testing.
 .venv
 # Release-private folders.
-Release\
+Release
 # General .abuilds left for comparision when building autobuild.
 .abuild
 # if not deleted.
