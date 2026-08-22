@@ -9,6 +9,16 @@ It was written with APIs in mind, so Tokenize, Parse, Executor()!
 
 ---
 
+### Arguments
+`AutoBuild` supports 2 arguments:
+
+- --help/-h: Print help
+- --version/-v: Print version
+
+and `autobuild <recipe>` for normal execution.
+
+---
+
 ### A Simple Code Example
 Heres a code example for AutoBuild:
 

@@ -2,6 +2,7 @@ import subprocess
 import os
 import sys
 from enum import Enum, auto
+from typing import Any
 
 
 # Token Types
@@ -124,7 +125,6 @@ class Tokenize:
                 self.tokens.append(Token(_TokenType.ASSIGN, "=", self.line))
                 for kind, val in self._parse_var_refs(value.strip()):
                     self.tokens.append(Token(_TokenType[kind], val, self.line))
-
             # if
             elif stripped.startswith("if ") and stripped.endswith("then"):
                 condition = stripped[3:-4].strip()
@@ -554,19 +554,13 @@ class Executor:
 
 
 if __name__ == "__main__":
-    from arghandle import ArgHandle
+    from arghandle import (
+        ArgHandle,
+    )  # ARGHANDLE v1.1.0 (USE LEGACY_API WITH OLD VERSION OR USE LEGACY_ARGHANDLE)
 
-    cli = ArgHandle()
-    cli.ProgramName("AutoBuild")
-    cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.", Exit=True)
-    # Handle version before parsing .abuild
-    if cli.IsArgInActualArgs("--version") or cli.IsArgInActualArgs("-v"):
-        raise SystemExit("AutoBuild v1.0.1\n")
-    # Handle help before parsing .abuild
-    if cli.IsArgInActualArgs("--help") or cli.IsArgInActualArgs("-h"):
-        # Register help and version only, no recipes yet
-        cli.RegisterArg(["--version", "-v"], HelpMsg="Prints the version and exit")
-        cli.HandleHelp()
+    cli = ArgHandle("AutoBuild", "v1.1.0")
+    cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.")
+    cli.HandleBasic()
     # Only now load and parse .abuild
     if not __import__("pathlib").Path(".abuild").exists():
         raise SystemExit("[AutoBuild] No .abuild file found in current directory.\n")
@@ -579,14 +573,14 @@ if __name__ == "__main__":
     except Exception as e:
         raise SystemExit(f"Error while running file: {e}\n")
     # Match and run recipe
-    arg = cli.SetVariableToIndex(1)
+    arg = cli.SetVariableToIndex("arg", 1)
     try:
         if arg and arg in executor.recipes_declared:
-            executor.RunRecipe(arg)
-        else:
-            raise SystemExit(
-                f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n"
-            )
+            if cli.arg:
+                executor.RunRecipe(arg)
+            else:
+                raise SystemExit(
+                    f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n"
+                )
     except Exception as e:
         raise SystemExit(f"Error while running file: {e}\n")
-
