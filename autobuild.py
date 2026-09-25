@@ -1,3 +1,4 @@
+import threading as td
 import subprocess
 import os
 import sys
@@ -23,6 +24,9 @@ class _TokenType(Enum):
     FOR_IN = auto()  # for x in (LIST)
     DO = auto()  # do
     SHELL = auto()  # shell
+    PARALLEL = auto()
+    PARALLEL_DO = auto()  # parallel do
+    PARALLEL_END = auto()  # pend
     RECIPE = auto()  # recipe declaration
     RECIPE_DEF = auto()  # recipe definition (name:)
     DEPENDS = auto()  # recipe dependencies
@@ -68,7 +72,11 @@ class Tokenize:
             if end == -1:
                 tokens.append(("STRING", text[start:]))
                 break
-            tokens.append(("VAR_REF", text[start + 1 : end]))
+            var_contents = text[start + 1 : end]
+            if " " in var_contents or '"' in var_contents or "'" in var_contents:
+                tokens.append(("STRING", text[start : end + 1]))
+            else:
+                tokens.append(("VAR_REF", var_contents))
             text = text[end + 1 :]
         return tokens
 
@@ -153,6 +161,15 @@ class Tokenize:
             # done
             elif stripped == "done":
                 self.tokens.append(Token(_TokenType.DONE, "done", self.line))
+
+            # parallel do
+            elif stripped == "parallel do":
+                self.tokens.append(Token(_TokenType.PARALLEL, "parallel", self.line))
+                self.tokens.append(Token(_TokenType.PARALLEL_DO, "do", self.line))
+            # pend
+
+            elif stripped == "pend":
+                self.tokens.append(Token(_TokenType.PARALLEL_END, "pend", self.line))
 
             # for till(n)
             elif stripped.startswith("for till("):
@@ -274,10 +291,11 @@ class Parser:
             t = self._current()
             if t.type == _TokenType.EOF:
                 break
-            if inside_block and t.type in (
+            if t.type in (
                 _TokenType.DONE,
                 _TokenType.ELIF,
                 _TokenType.ELSE,
+                _TokenType.PARALLEL_END,
             ):
                 break
             if not inside_block and t.type in (
@@ -348,6 +366,13 @@ class Parser:
         body = self._parse_body(inside_block=False)
         return ASTNode("recipe_def", name=name, deps=deps, body=body)
 
+    def _parse_parallel(self) -> ASTNode:
+        self._expect(_TokenType.PARALLEL_DO)
+        self._skip_newlines()
+        body = self._parse_body(inside_block=True)
+        self._expect(_TokenType.PARALLEL_END)
+        return ASTNode("parallel", body=body)
+
     def _parse_statement(self) -> ASTNode:
         self._skip_newlines()
         t = self._current()
@@ -397,7 +422,9 @@ class Parser:
         elif t.type == _TokenType.STRING:
             parts = self._parse_string_sequence()
             return ASTNode("command", parts=parts)
-
+        elif t.type == _TokenType.PARALLEL:
+            self._advance()
+            return self._parse_parallel()
         else:
             self._advance()
             return None
@@ -421,6 +448,7 @@ class Executor:
     def __init__(self, ast: list):
         self.ast = ast
         self.vars = {}
+        self.vars_lock = td.Lock()
         self.recipes_declared = []
         self.recipes_defined = {}
         self._collect_recipes()
@@ -438,7 +466,8 @@ class Executor:
         result = ""
         for kind, val in parts:
             if kind == "VAR_REF":
-                resolved = self.vars.get(val, None)
+                with self.vars_lock:
+                    resolved = self.vars.get(val, None)
                 if resolved is None:
                     print(f"WARNING: Variable [{val}] is not defined")
                     result += "NULL"
@@ -474,7 +503,7 @@ class Executor:
 
     def _run_command(self, cmd: str):
         """Runs a shell command, streaming output live."""
-        print(f"\n>> {cmd}\n")
+        print(f"\n\033[36m{cmd}\n\033[0m")
         result = subprocess.run(cmd, shell=True)
         if result.returncode != 0:
             raise SystemExit(
@@ -521,7 +550,26 @@ class Executor:
                 self._execute(node.data["body"])
             # clean up loop var
             self.vars.pop(var, None)
+        elif node.type == "parallel":
+            threads = []
+            for child_node in node.data["body"]:
+                if not child_node:
+                    continue
 
+                def thread_target(target_node):
+                    try:
+                        self._execute_node(target_node)
+                    except Exception as e:
+                        print(
+                            f"\033[31mFatal: Thread failed executing {target_node.type}: {e}\033[0m"
+                        )
+
+                t = td.Thread(target=thread_target, args=(child_node,))
+                threads.append(t)
+                t.start()
+
+                for t in threads:
+                    t.join()
         elif node.type == "recipe_decl":
             pass  # already handled in _collect_recipes
 
@@ -554,16 +602,29 @@ class Executor:
 
 
 if __name__ == "__main__":
-    from arghandle import (
-        ArgHandle,
-    )  # ARGHANDLE v1.1.0 (USE LEGACY_API WITH OLD VERSION OR USE LEGACY_ARGHANDLE)
+    from arghandle import ArgHandle
 
-    cli = ArgHandle("AutoBuild", "v1.1.0")
+    cli = ArgHandle("AutoBuild", "v2.0.0")
     cli.PrintOnNoArgs("No arguments provided. Use --help or -h for usage.")
+    cli.CustomHelpMsg(
+        """
+AutoBuild v2.0.0 HELP called:
+\033[36m--help OR -h: Print this help message and exit.\033[0m
+\033[36m--version OR -v: Print version and exit.\033[0m
+\033[33m[RECIPE]: The recipe name...\033[0m
+
+\033[36m
+\033[4mExamples:\033[0m\033[36m
+autobuild test # test is the recipe name you defined in .abuild
+autobuild -h
+autobuild -v
+\033[0m
+"""
+    )
     cli.HandleBasic()
     # Only now load and parse .abuild
     if not __import__("pathlib").Path(".abuild").exists():
-        raise SystemExit("[AutoBuild] No .abuild file found in current directory.\n")
+        raise SystemExit("AutoBuild: No .abuild file found in current directory.\n")
     try:
         source = open(".abuild").read()
         tokens = Tokenize(source).GetTokens()
@@ -573,14 +634,14 @@ if __name__ == "__main__":
     except Exception as e:
         raise SystemExit(f"Error while running file: {e}\n")
     # Match and run recipe
-    arg = cli.SetVariableToIndex("arg", 1)
+    arg = cli.SetVariableToIndex("arg", 1) if cli.ArgCount() >= 2 else ""
     try:
         if arg and arg in executor.recipes_declared:
-            if cli.arg:
-                executor.RunRecipe(arg)
+            if cli.arg:  # pyright: ignore
+                executor.RunRecipe(arg)  # pyright: ignore
             else:
-                raise SystemExit(
-                    f"[AutoBuild] Unknown argument. Use --help or -h for usage.\n"
+                cli.ErrorArgPrint(
+                    "AutoBuild: Unknown argument. Use --help or -h for usage.\n"
                 )
-    except Exception as e:
-        raise SystemExit(f"Error while running file: {e}\n")
+    except (Exception, SystemExit, KeyboardInterrupt) as e:
+        cli.ErrorArgPrint(f"Error while running file: {e}\n")

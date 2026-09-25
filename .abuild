@@ -1,0 +1,17 @@
+get OS
+
+if OS==Windows_NT then
+echo Running on windows!
+else
+echo Running on: (OS)
+done
+recipe test
+
+test:
+  echo This is a test recipe to check autobuild works or not...
+  parallel do
+    shell py -c "print(\"Running in parallel!\")"
+  pend
+  echo Tests done!
+
+
