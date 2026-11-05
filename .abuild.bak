@@ -1,8 +1,0 @@
-# Just a minute... Can you add a stdlib function in autobuild (cprint (colored print), which supports cprint("(C.CYAN)Hi(C.RESET)") and a lot of more colors)
-fn thing(arg) {
-  touch arg
-  print("\033[33mCreated (arg)...\033[0m")
-}
-recipe stuff
-stuff:
-  thing("duper")
