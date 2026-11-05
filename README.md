@@ -4,8 +4,7 @@ Unlike _Make_ with its .PHONY systems. AutoBuild handles all of that.
 
 Just define your recipes and add the logic to them and now you can run them.
 
-Autobuild files are written in the .abuild format.
-It was written with APIs in mind, so Tokenize, Parse, Executor()!
+Autobuild files are written in the _.abuild_ format.
 
 ---
 
@@ -14,10 +13,12 @@ It was written with APIs in mind, so Tokenize, Parse, Executor()!
 
 - --help/-h: Print help
 - --version/-v: Print version
-
+- --jobs=n: Amount of jobs (also controlled by jobs(n))
 and `autobuild <recipe>` for normal execution.
 
 ---
+
+
 
 ### A Simple Code Example
 Heres a code example for AutoBuild:

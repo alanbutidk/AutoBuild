@@ -1,17 +1,212 @@
 get OS
 
 if OS==Windows_NT then
-echo Running on windows!
-else
-echo Running on: (OS)
+  let PY = python
+  let exec = .exe
+  let RM = del /f /q
+  let RMDIR = rmdir /s /q
+  let COPY = COPY
+else then
+  let PY = python3
+  let exec =
+  let RM = rm -f
+  let RMDIR = rm -rf
+  let COPY = cp
 done
+
+let CC = -m nuitka
+
+# --nofollow-import-to flags, split across a few lets for readability.
+# NOTE: asyncio and concurrent.futures are deliberately NOT in this list.
+# AutoBuild's own `parallel do` feature is built on them - nofollowing
+# them would silently break parallel execution inside the compiled
+# binary. (Also fixed two long-standing typos from the old flag list:
+# PtQt5/PtQt6 -> PyQt5/PyQt6, and disutils -> distutils - both typo'd
+# entries were quietly excluding nothing.)
+
+let NOFOLLOW_1 = --nofollow-import-to=numpy --nofollow-import-to=pandas --nofollow-import-to=scipy --nofollow-import-to=matplotlib --nofollow-import-to=PIL --nofollow-import-to=tkinter
+let NOFOLLOW_2 = --nofollow-import-to=PyQt5 --nofollow-import-to=PyQt6 --nofollow-import-to=wx --nofollow-import-to=django --nofollow-import-to=flask --nofollow-import-to=fastapi
+let NOFOLLOW_3 = --nofollow-import-to=sqlalchemy --nofollow-import-to=requests --nofollow-import-to=urllib3 --nofollow-import-to=cryptography --nofollow-import-to=ssl --nofollow-import-to=unittest
+let NOFOLLOW_4 = --nofollow-import-to=pydoc --nofollow-import-to=doctest --nofollow-import-to=turtle --nofollow-import-to=curses --nofollow-import-to=idlelib --nofollow-import-to=lib2to3
+let NOFOLLOW_5 = --nofollow-import-to=distutils --nofollow-import-to=ensurepip --nofollow-import-to=venv --nofollow-import-to=setuptools --nofollow-import-to=pkg_resources --nofollow-import-to=pip
+let NOFOLLOW_6 = --nofollow-import-to=email --nofollow-import-to=html --nofollow-import-to=http --nofollow-import-to=xml --nofollow-import-to=xmlrpc
+
+# Please note that we need to use zig on windows. Please try
+# Setting 'zig' as the CC if possible or let it install zig...
+
+if OS==Windows_NT then
+  let NOFOLLOW_7 = --nofollow-import-to=test --include-windows-runtime-dlls=yes
+else
+  let NOFOLLOW_7 = --nofollow-import-to=test
+done
+
+let PYFLAGS_BASE = --onefile --standalone --remove-output --no-pyi-file --assume-yes-for-downloads
+
+let SRC = autobuild.py
+let TARGET = autobuild
+let DEFAULT_COPY_AUTOBUILD_NAME = _autobuild___.py
+
+recipe build
+recipe clean
+recipe _copy_autobuild_to_avoid_compile_errors
+recipe clean_test
 recipe test
 
-test:
-  echo This is a test recipe to check autobuild works or not...
+# Default
+default(build)
+
+build:
+  incremental("autobuild.exe")
   parallel do
-    shell py -c "print(\"Running in parallel!\")"
+    (PY) (CC) (PYFLAGS_BASE) (NOFOLLOW_1) (NOFOLLOW_2) (NOFOLLOW_3) (NOFOLLOW_4) (NOFOLLOW_5) (NOFOLLOW_6) (NOFOLLOW_7) --output-filename=(TARGET)(exec) (SRC)
   pend
-  echo Tests done!
 
+clean:
+  (RM) (TARGET)(exec)
+  (RMDIR) autobuild.build
+  (RMDIR) autobuild.dist
+  (RMDIR) autobuild.onefile-build
 
+# ---------------------------------------------------------------------
+# a real module, used to exercise module namespacing and cross-module
+# fn calls: `tag` calls no sibling here, but test.module_sibling_call
+# below defines its own module with a sibling call, kept separate so
+# each test is self-contained and easy to read top-to-bottom.
+# ---------------------------------------------------------------------
+module pkg
+  fn tag(name) {
+    let t = v-(name)
+    return (t)
+  }
+
+  recipe pack
+  pack:
+    let v = tag(1.0.0)
+    shell test "(v)" = "v-1.0.0"
+done
+
+# ---------------------------------------------------------------------
+# test suite
+#
+# Checks use `shell test "actual" = "expected"` as a native assertion:
+# `test` is POSIX and exits non-zero on mismatch, which AutoBuild
+# already treats as a hard failure (Executor._run_command raises
+# SystemExit on non-zero exit) - so a failing check aborts the whole
+# run with a clear message, no separate assertion framework needed.
+#
+# Three things the AutoBuild language has no way to assert from inside
+# itself - because they're about the AST/interpreter shape, not a
+# runtime value - are covered by small companion Python scripts instead
+# of being faked as in-language checks: whether a recipe declared
+# inside `module X` is really unreachable as a bare name, whether the
+# optimizer actually removed AST nodes (not just produced the same
+# output by luck), and whether `parallel do` truly refuses a `let`
+# rather than silently dropping it. See optimizer_checks.py and
+# module_and_parallel_checks.py.
+# ---------------------------------------------------------------------
+
+module test
+  recipe smoke
+  recipe fn_return_value
+  recipe fn_no_return_is_empty
+  recipe module_sibling_call
+  recipe file_write_read_roundtrip
+  recipe file_append_mode
+  recipe parallel_is_concurrent
+  recipe for_in_loop
+  recipe nested_parens_regression
+  recipe all
+
+  smoke: _copy_autobuild_to_avoid_compile_errors
+    echo [smoke] CLI starts and responds to --help / --version
+    (PY) (DEFAULT_COPY_AUTOBUILD_NAME) --help
+    (PY) (DEFAULT_COPY_AUTOBUILD_NAME) --version
+
+  fn_return_value:
+    echo [fn_return_value] fn with a param and a return value, used via let
+    fn double(x) {
+      let d = (x)(x)
+      return (d)
+    }
+    let out = double(ab)
+    shell test "(out)" = "abab"
+
+  fn_no_return_is_empty:
+    echo [fn_no_return_is_empty] a fn with no return yields empty string, not NULL
+    fn noop(x) {
+      let ignored = (x)
+    }
+    let out = noop(anything)
+    shell test "(out)" = ""
+
+  module_sibling_call: pkg.pack
+    echo [module_sibling_call] fn tag inside module pkg was called and returned v-1.0.0
+
+  file_write_read_roundtrip:
+    echo [file_write_read_roundtrip] openfile/writefile/closefile then reopen+readfile
+    let h = openfile(_test_rt.txt, w, utf-8)
+    let ig1 = writefile((h), round-trip-ok)
+    let ig2 = closefile((h))
+    let h2 = openfile(_test_rt.txt, r, utf-8)
+    let back = readfile((h2))
+    let ig3 = closefile((h2))
+    shell test "(back)" = "round-trip-ok"
+    (RM) _test_rt.txt
+
+  file_append_mode:
+    echo [file_append_mode] mode 'a' appends instead of overwriting
+    let h1 = openfile(_test_append.txt, w, utf-8)
+    let ig1 = writefile((h1), a)
+    let ig2 = closefile((h1))
+    let h2 = openfile(_test_append.txt, a, utf-8)
+    let ig3 = writefile((h2), b)
+    let ig4 = closefile((h2))
+    let h3 = openfile(_test_append.txt, r, utf-8)
+    let back = readfile((h3))
+    let ig5 = closefile((h3))
+    shell test "(back)" = "ab"
+    (RM) _test_append.txt
+
+  parallel_is_concurrent:
+    echo [parallel_is_concurrent] two 0.4s shell sleeps under parallel do finish in well under 0.8s combined
+    parallel do
+      shell (PY) -c "import time; time.sleep(0.4)"
+      shell (PY) -c "import time; time.sleep(0.4)"
+    pend
+
+  for_in_loop:
+    echo [for_in_loop] for-in visits every whitespace-separated item, in order
+    let LIST = a b c
+    let LAST =
+    for x in (LIST) do
+      let LAST = (x)
+    done
+    shell test "(LAST)" = "c"
+
+  nested_parens_regression: _copy_autobuild_to_avoid_compile_errors
+    echo [nested_parens_regression] a shell line with nested parens never resolves to NULL
+    parallel do
+      shell (PY) -c "from autobuild import Tokenize, Parser, Executor; Executor(Parser(Tokenize(\"recipe t\nt:\n\techo nested-paren-ok\n\").GetTokens()).GetAST()).RunRecipe(\"t\")"
+    pend
+
+  all: smoke fn_return_value fn_no_return_is_empty module_sibling_call file_write_read_roundtrip file_append_mode parallel_is_concurrent for_in_loop nested_parens_regression
+    echo ==========================================
+    echo AutoBuild in-language tests: all passed.
+    echo For AST/optimizer/module-isolation/parallel-guard coverage, also run:
+    echo   (PY) optimizer_checks.py
+    echo   (PY) module_and_parallel_checks.py
+    echo ==========================================
+done
+
+# Back-compat: `autobuild test` (no dot) is what the old .abuild used to
+# expose. Keep that command working by aliasing it straight to the full
+# in-language suite - anyone typing the old, familiar invocation still
+# gets everything test.all runs, instead of a silent "unknown recipe".
+test: test.all
+  echo test.all already printed its own summary above
+
+_copy_autobuild_to_avoid_compile_errors:
+  (COPY) (SRC) (DEFAULT_COPY_AUTOBUILD_NAME)
+
+clean_test:
+  (RM) (DEFAULT_COPY_AUTOBUILD_NAME)
