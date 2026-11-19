@@ -56,7 +56,7 @@ recipe test
 default(build)
 
 build:
-  incremental("autobuild.exe")
+  incremental("autobuild")
   parallel do
     (PY) (CC) (PYFLAGS_BASE) (NOFOLLOW_1) (NOFOLLOW_2) (NOFOLLOW_3) (NOFOLLOW_4) (NOFOLLOW_5) (NOFOLLOW_6) (NOFOLLOW_7) --output-filename=(TARGET)(exec) (SRC)
   pend

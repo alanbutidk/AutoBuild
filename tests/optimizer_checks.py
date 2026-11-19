@@ -11,6 +11,7 @@ as a companion to `test.all` in .abuild.
 Run directly:  python3 optimizer_checks.py
 Exits 0 if every check passes, non-zero (with a message) otherwise.
 """
+
 import sys
 
 from autobuild import Tokenize, Parser, Optimizer

@@ -22,7 +22,7 @@ Exits 0 if every check passes, non-zero (with a message) otherwise.
 
 import sys
 
-from old_autobuild import Tokenize, Parser, Executor, Optimizer
+from autobuild import Tokenize, Parser, Executor, Optimizer
 
 
 def check(name, condition, detail=""):

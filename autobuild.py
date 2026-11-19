@@ -3129,13 +3129,15 @@ def _init_cli(argv: list) -> int:
 
 
 def _expand_cli() -> int:
-    if not os.path.exists(".abuild"):
-        print("AutoBuild: No .abuild file found in current directory.", file=sys.stderr)
+    if not os.path.exists(_ABUILD_PATH):
+        print(_no_abuild_msg(), file=sys.stderr)
         return 1
     try:
-        with open(".abuild", encoding="utf-8") as f:
+        with open(_ABUILD_PATH, encoding="utf-8") as f:
             print(
-                _expand_includes(f.read(), os.getcwd(), [os.path.realpath(".abuild")])
+                _expand_includes(
+                    f.read(), _abuild_dir(), [os.path.realpath(_ABUILD_PATH)]
+                )
             )
     except SystemExit as e:
         print(e, file=sys.stderr)
@@ -3559,12 +3561,12 @@ def _watch_cli(argv: list) -> int:
 
 
 def _compdb_cli() -> int:
-    if not os.path.exists(".abuild"):
-        print("AutoBuild: No .abuild file found in current directory.", file=sys.stderr)
+    if not os.path.exists(_ABUILD_PATH):
+        print(_no_abuild_msg(), file=sys.stderr)
         return 1
     try:
-        with open(".abuild", encoding="utf-8") as f:
-            _expand_includes(f.read(), os.getcwd(), [os.path.realpath(".abuild")])
+        with open(_ABUILD_PATH, encoding="utf-8") as f:
+            _expand_includes(f.read(), _abuild_dir(), [os.path.realpath(_ABUILD_PATH)])
     except SystemExit as e:
         print(e, file=sys.stderr)
         return 1
@@ -3581,13 +3583,13 @@ def _compdb_cli() -> int:
 
 
 def _list_cli() -> int:
-    if not os.path.exists(".abuild"):
-        print("AutoBuild: No .abuild file found in current directory.", file=sys.stderr)
+    if not os.path.exists(_ABUILD_PATH):
+        print(_no_abuild_msg(), file=sys.stderr)
         return 1
     try:
-        with open(".abuild", encoding="utf-8") as f:
+        with open(_ABUILD_PATH, encoding="utf-8") as f:
             source = _expand_includes(
-                f.read(), os.getcwd(), [os.path.realpath(".abuild")]
+                f.read(), _abuild_dir(), [os.path.realpath(_ABUILD_PATH)]
             )
         ast = Parser(Tokenize(source).GetTokens()).GetAST()
     except BaseException as e:
@@ -3601,6 +3603,8 @@ def _list_cli() -> int:
 
 _VAR_RE = re.compile(r"^([A-Za-z_]\w*)=(.*)$", re.S)
 _VALUE_FLAGS = {
+    "--file",
+    "-f",
     "--log-file",
     "--jobs",
     "-j",
@@ -3611,6 +3615,27 @@ _VALUE_FLAGS = {
     "--watch-interval",
 }
 _CLI_PROFILE = None  # --profile NAME (or --var profile=NAME); read by templates
+_ABUILD_PATH = ".abuild"  # --file/-f PATH overrides it (set in the CLI entry point)
+
+
+def _abuild_dir() -> str:
+    """Directory `include` lines in the build file resolve against."""
+    return os.path.dirname(os.path.abspath(_ABUILD_PATH))
+
+
+def _no_abuild_msg() -> str:
+    if _ABUILD_PATH == ".abuild":
+        return "AutoBuild: No .abuild file found in current directory."
+    return f"AutoBuild: build file '{_ABUILD_PATH}' not found."
+
+
+def _die(msg: str, code: int = 1):
+    """Print an error to stderr and exit non-zero (ArgHandle.ErrorArgPrint
+    raises a bare SystemExit, i.e. exit code 0, which made every failure
+    look like success to shells and CI)."""
+    red, off = ("\033[31m", "\033[0m") if sys.stderr.isatty() else ("", "")
+    print(f"{red}{msg.rstrip()}{off}", file=sys.stderr)
+    raise SystemExit(code)
 
 
 def _own_args(argv: list) -> list:
@@ -3622,6 +3647,7 @@ def _own_args(argv: list) -> list:
 _KNOWN_LONG = {
     "--help",
     "--version",
+    "--file",
     "--explain",
     "--force",
     "--var",
@@ -3697,7 +3723,15 @@ def _parse_cli_vars(argv: list) -> dict:
             i += 1
         elif a.startswith("--profile="):
             out["profile"] = a.split("=", 1)[1]
-        elif a in ("--log-file", "--jobs", "-j", "--watch-path", "--watch-interval"):
+        elif a in (
+            "--file",
+            "-f",
+            "--log-file",
+            "--jobs",
+            "-j",
+            "--watch-path",
+            "--watch-interval",
+        ):
             i += 1  # skip this flag's value
         elif not a.startswith("-") and _VAR_RE.match(a):
             spec = a
@@ -3781,13 +3815,13 @@ def _graph_cli(argv: list) -> int:
     pos = _positionals(args)
     target = pos[0] if pos else None
 
-    if not os.path.exists(".abuild"):
-        print("AutoBuild: No .abuild file found in current directory.", file=sys.stderr)
+    if not os.path.exists(_ABUILD_PATH):
+        print(_no_abuild_msg(), file=sys.stderr)
         return 1
     try:
-        with open(".abuild", encoding="utf-8") as f:
+        with open(_ABUILD_PATH, encoding="utf-8") as f:
             source = _expand_includes(
-                f.read(), os.getcwd(), [os.path.realpath(".abuild")]
+                f.read(), _abuild_dir(), [os.path.realpath(_ABUILD_PATH)]
             )
         ast = Parser(Tokenize(source).GetTokens()).GetAST()
     except BaseException as e:
@@ -4655,9 +4689,18 @@ autobuild --graph dot > deps.dot
 \033[0m
 """
     )
+    cli.RegisterArg(
+        ["--file", "-f"],
+        Type=str,
+        Type_ExitOnError=True,
+        HelpMsg="Use specific file given to run",
+    )
     own = _own_args(sys.argv[1:])
     _warn_unknown_flags(own)
     cli.HandleBasic()
+    _ABUILD_PATH = _opt_value(own, ["--file", "-f"], ".abuild")
+    if "--repl" in own or "-r" in own:
+        _die("AutoBuild: --repl is not implemented yet.")
     explain = "--explain" in own
     force = "--force" in own
     log_path = _opt_value(own, ["--log-file"], DEFAULT_LOG_PATH)
@@ -4681,7 +4724,6 @@ autobuild --graph dot > deps.dot
         raise SystemExit(_init_cli(own))
     if "--expand" in own:
         raise SystemExit(_expand_cli())
-
     # --graph only reads and parses .abuild; it never runs anything
     if "--graph" in own:
         raise SystemExit(_graph_cli(own))
@@ -4699,14 +4741,15 @@ autobuild --graph dot > deps.dot
         raise
     run_log.record["recipe"] = arg or None
 
-    # Load autobuild CLI and parse .abuild
-    if not __import__("pathlib").Path(".abuild").exists():
-        run_log.finish("error", "No .abuild file found in current directory")
-        raise SystemExit("AutoBuild: No .abuild file found in current directory.\n")
+    # Load autobuild CLI and parse the build file (.abuild or --file PATH)
+    if not os.path.isfile(_ABUILD_PATH):
+        run_log.finish("error", _no_abuild_msg())
+        _die(_no_abuild_msg())
     try:
-        source = _expand_includes(
-            open(".abuild").read(), os.getcwd(), [os.path.realpath(".abuild")]
-        )
+        with open(_ABUILD_PATH, encoding="utf-8") as _f:
+            source = _expand_includes(
+                _f.read(), _abuild_dir(), [os.path.realpath(_ABUILD_PATH)]
+            )
         tokens = Tokenize(source).GetTokens()
         ast = Parser(tokens).GetAST()
         optimizer = Optimizer(ast, explain=explain, cli_vars=cli_vars)
@@ -4722,7 +4765,7 @@ autobuild --graph dot > deps.dot
         # print(f"[DEBUG]: Recipes declared; {executor.recipes_declared}")
     except KeyboardInterrupt:
         run_log.finish("interrupted", "KeyboardInterrupt")
-        raise
+        raise SystemExit(130)
     except BaseException as e:
         # BaseException: a failing top-level command raises SystemExit,
         # which `except Exception` would let through unlogged.
@@ -4735,7 +4778,7 @@ autobuild --graph dot > deps.dot
         print(f"[AutoBuild] No recipe given - running default: {arg}")
     if not arg:
         run_log.finish("error", "No recipe name given and no default() set")
-        cli.ErrorArgPrint(
+        _die(
             "AutoBuild: No recipe name given and no default(RECIPE) set.\n"
             "Recipes:\n"
             + _format_recipe_list(
@@ -4767,7 +4810,7 @@ autobuild --graph dot > deps.dot
                 + "\n"
             )
         run_log.finish("error", f"Unknown recipe '{arg}'")
-        cli.ErrorArgPrint(msg)
+        _die(msg)
     else:
         try:
             executor.RunRecipe(arg)  # pyright: ignore
@@ -4780,7 +4823,7 @@ autobuild --graph dot > deps.dot
             run_log.finish("success")
         except KeyboardInterrupt:
             run_log.finish("interrupted", "KeyboardInterrupt")
-            raise
+            raise SystemExit(130)
         except BaseException as e:
             run_log.finish("failed", str(e))
-            cli.ErrorArgPrint(f"Error while running file: {e}\n")
+            _die(f"Error while running file: {e}\n")

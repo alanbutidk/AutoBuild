@@ -1,0 +1,298 @@
+# =============================================================================
+# android.abuild - build Android apps with AutoBuild, no Gradle.
+#
+# Drives the same SDK tools the Android Gradle Plugin runs under the hood:
+#   aapt2 compile/link -> kotlinc/javac -> jar -> d8 -> zipalign -> apksigner -> adb
+#
+# Use it from your .abuild:
+#
+#     include "android.abuild"
+#     let PACKAGE = com.example.hello
+#     default(android.apk)
+#
+# Recipes (all in module `android`; run as `autobuild android.apk` ...):
+#   check  res  link  classes  dex  unsigned  align  sign  apk  verify
+#   install  run  uninstall  devices  logcat  info  clean
+#
+# Every setting below uses `?=`, so set your own with `let` in your .abuild
+# (before the include) or override on the command line:
+#     autobuild android.apk -D VARIANT=release -D KEYSTORE=my.jks -D KS_PASS=secret
+#
+# Not covered (AGP does these, this module does not): Maven/AAR dependency
+# resolution (drop .jar files in libs/ instead), manifest merging across
+# libraries, R8/ProGuard, AAB bundles, data/view binding, NDK/CMake.
+# =============================================================================
+
+get OS
+if OS==Windows_NT then
+  let EXE = .exe
+  let BAT = .bat
+  let SEP = ;
+else then
+  let EXE =
+  let BAT =
+  let SEP = :
+done
+
+# ---- project settings --------------------------------------------------------
+
+let APP_NAME     ?= app
+let PACKAGE      ?= com.example.app
+let MAIN_ACTIVITY ?= .MainActivity
+let VARIANT      ?= debug
+let MIN_SDK      ?= 24
+let TARGET_SDK   ?= 35
+let COMPILE_SDK  ?= 35
+let VERSION_CODE ?= 1
+let VERSION_NAME ?= 1.0
+let JAVA_RELEASE ?= 17
+
+let MANIFEST     ?= src/main/AndroidManifest.xml
+let RES_DIR      ?= src/main/res
+let ASSETS_DIR   ?= src/main/assets
+let JAVA_DIR     ?= src/main/java
+let KOTLIN_DIR   ?= src/main/kotlin
+let LIBS_DIR     ?= libs
+let BUILD_DIR    ?= build
+
+# ---- signing (debug builds create build/debug.keystore on demand) -------------
+let KEYSTORE     ?= none
+let KS_ALIAS     ?= androiddebugkey
+let KS_PASS      ?= android
+
+# ---- SDK and tools -----------------------------------------------------------
+let ANDROID_SDK  ?= getenv(ANDROID_HOME, none)
+let _bts = glob((ANDROID_SDK)/build-tools/*)
+let _bt_last = at((_bts), -1)
+let BUILD_TOOLS  ?= basename((_bt_last))
+let BT_DIR       ?= (ANDROID_SDK)/build-tools/(BUILD_TOOLS)
+let ANDROID_JAR  ?= (ANDROID_SDK)/platforms/android-(COMPILE_SDK)/android.jar
+let ADB          ?= (ANDROID_SDK)/platform-tools/adb(EXE)
+let JAVAC        ?= javac
+let JAR          ?= jar
+let KEYTOOL      ?= keytool
+let KOTLINC      ?= kotlinc
+
+# ---- build outputs -----------------------------------------------------------
+let GEN_DIR      = (BUILD_DIR)/gen
+let CLASSES_DIR  = (BUILD_DIR)/classes
+let DEX_DIR      = (BUILD_DIR)/dex
+let RES_ZIP      = (BUILD_DIR)/res.zip
+let BASE_APK     = (BUILD_DIR)/base.apk
+let CLASSES_JAR  = (BUILD_DIR)/classes.jar
+let UNSIGNED_APK = (BUILD_DIR)/(APP_NAME)-(VARIANT)-unsigned.apk
+let ALIGNED_APK  = (BUILD_DIR)/(APP_NAME)-(VARIANT)-aligned.apk
+let APK          = (BUILD_DIR)/(APP_NAME)-(VARIANT).apk
+let DEBUG_KS     = (BUILD_DIR)/debug.keystore
+let _salt        = (PACKAGE)-(MIN_SDK)-(TARGET_SDK)-(COMPILE_SDK)-(VERSION_CODE)-(VERSION_NAME)-(VARIANT)-(JAVA_RELEASE)
+
+recipe android.check
+recipe android.res
+recipe android.link
+recipe android.classes
+recipe android.dex
+recipe android.unsigned
+recipe android.align
+recipe android.sign
+recipe android.apk
+recipe android.verify
+recipe android.install
+recipe android.run
+recipe android.uninstall
+recipe android.devices
+recipe android.logcat
+recipe android.info
+recipe android.clean
+
+describe(android.check, "Check the SDK, build-tools, android.jar and manifest exist")
+describe(android.res, "Compile resources with aapt2")
+describe(android.link, "Link resources and the manifest into a base APK and generate R.java")
+describe(android.classes, "Compile Kotlin and Java sources into a jar")
+describe(android.dex, "Convert classes to dex with d8")
+describe(android.unsigned, "Add the dex files to the base APK")
+describe(android.align, "Align the APK with zipalign")
+describe(android.sign, "Sign the APK with apksigner")
+describe(android.apk, "Build the complete signed APK")
+describe(android.verify, "Verify the APK signature")
+describe(android.install, "Install the APK on the connected device")
+describe(android.run, "Install and launch the app")
+describe(android.uninstall, "Uninstall the app from the device")
+describe(android.devices, "List connected devices")
+describe(android.logcat, "Stream the device log")
+describe(android.info, "Print the resolved SDK paths and settings")
+describe(android.clean, "Delete the build directory")
+default(android.apk, soft)
+
+module android
+  check:
+    if isdir((ANDROID_SDK)) then
+      print(SDK: (ANDROID_SDK))
+    else then
+      fail(Android SDK not found - set ANDROID_HOME or pass -D ANDROID_SDK=PATH)
+    done
+    if isdir((BT_DIR)) then
+      print(build-tools: (BUILD_TOOLS))
+    else then
+      fail(build-tools not found - install them or pass -D BUILD_TOOLS=VERSION)
+    done
+    if isfile((ANDROID_JAR)) then
+      print(platform: android-(COMPILE_SDK))
+    else then
+      fail(android.jar missing - install platform android-(COMPILE_SDK) or pass -D COMPILE_SDK=N)
+    done
+    if isfile((MANIFEST)) then
+      print(manifest: (MANIFEST))
+    else then
+      fail(manifest not found at (MANIFEST) - pass -D MANIFEST=PATH)
+    done
+
+  res: check
+    mkdir((BUILD_DIR))
+    if isdir((RES_DIR)) then
+      let _res = glob((RES_DIR)/**/*.*)
+      if changed(android-res, (_res), (RES_ZIP), (_salt)) then
+        "(BT_DIR)/aapt2(EXE)" compile --dir (RES_DIR) -o (RES_ZIP)
+      else
+        print(up to date: resources)
+      done
+    else
+      print(no res directory - skipping resource compilation)
+    done
+
+  link: res
+    mkdir((GEN_DIR))
+    let _in = glob((MANIFEST), (RES_ZIP), (ASSETS_DIR)/**/*.*)
+    if changed(android-link, (_in), (BASE_APK), (_salt)) then
+      let _rz =
+      if exists((RES_ZIP)) then
+        let _rz = (RES_ZIP)
+      done
+      let _as =
+      if isdir((ASSETS_DIR)) then
+        let _as = -A (ASSETS_DIR)
+      done
+      let _dbg =
+      if VARIANT==debug then
+        let _dbg = --debug-mode
+      done
+      "(BT_DIR)/aapt2(EXE)" link -o (BASE_APK) -I (ANDROID_JAR) --manifest (MANIFEST) --java (GEN_DIR) --min-sdk-version (MIN_SDK) --target-sdk-version (TARGET_SDK) --version-code (VERSION_CODE) --version-name (VERSION_NAME) --auto-add-overlay (_as) (_dbg) (_rz)
+    else
+      print(up to date: (BASE_APK))
+    done
+
+  classes: link
+    let _jsrc = glob((JAVA_DIR)/**/*.java, (GEN_DIR)/**/*.java)
+    let _ksrc = glob((KOTLIN_DIR)/**/*.kt)
+    let _libs = glob((LIBS_DIR)/*.jar)
+    if len((_jsrc)) == 0 then
+      if len((_ksrc)) == 0 then
+        fail(no Java or Kotlin sources found under (JAVA_DIR) or (KOTLIN_DIR))
+      done
+    done
+    let _in = glob((JAVA_DIR)/**/*.java, (KOTLIN_DIR)/**/*.kt, (LIBS_DIR)/*.jar, (BASE_APK))
+    if changed(android-classes, (_in), (CLASSES_JAR), (_salt)) then
+      rm((CLASSES_DIR))
+      mkdir((CLASSES_DIR))
+      let _cp = (ANDROID_JAR)
+      if len((_libs)) > 0 then
+        let _libcp = join((_libs), (SEP))
+        let _cp = (_cp)(SEP)(_libcp)
+      done
+      let _jfiles = join((_jsrc))
+      let _kfiles = join((_ksrc))
+      if len((_ksrc)) > 0 then
+        "(KOTLINC)" -cp "(_cp)" -d (CLASSES_DIR) (_kfiles) (_jfiles)
+      done
+      if len((_jsrc)) > 0 then
+        "(JAVAC)" --release (JAVA_RELEASE) -cp "(_cp)(SEP)(CLASSES_DIR)" -d (CLASSES_DIR) (_jfiles)
+      done
+      "(JAR)" cf (CLASSES_JAR) -C (CLASSES_DIR) .
+    else
+      print(up to date: (CLASSES_JAR))
+    done
+
+  dex: classes
+    let _libs = glob((LIBS_DIR)/*.jar)
+    let _in = glob((CLASSES_JAR), (LIBS_DIR)/*.jar)
+    let _out = (DEX_DIR)/classes.dex
+    if changed(android-dex, (_in), (_out), (_salt)) then
+      rm((DEX_DIR))
+      mkdir((DEX_DIR))
+      let _mode = --release
+      if VARIANT==debug then
+        let _mode = --debug
+      done
+      let _jars = join((_in))
+      "(BT_DIR)/d8(BAT)" (_mode) --lib (ANDROID_JAR) --min-api (MIN_SDK) --output (DEX_DIR) (_jars)
+    else
+      print(up to date: dex)
+    done
+
+  unsigned: dex
+    let _in = glob((BASE_APK), (DEX_DIR)/*.dex)
+    if changed(android-unsigned, (_in), (UNSIGNED_APK), (_salt)) then
+      cp((BASE_APK), (UNSIGNED_APK))
+      "(JAR)" uMf (UNSIGNED_APK) -C (DEX_DIR) .
+    else
+      print(up to date: (UNSIGNED_APK))
+    done
+
+  align: unsigned
+    if changed(android-align, (UNSIGNED_APK), (ALIGNED_APK), (_salt)) then
+      "(BT_DIR)/zipalign(EXE)" -f -p 4 (UNSIGNED_APK) (ALIGNED_APK)
+    else
+      print(up to date: (ALIGNED_APK))
+    done
+
+  sign: align
+    let _ks = (KEYSTORE)
+    if KEYSTORE==none then
+      if VARIANT==release then
+        fail(release builds need a keystore - pass -D KEYSTORE=PATH -D KS_ALIAS=NAME -D KS_PASS=SECRET)
+      done
+      let _ks = (DEBUG_KS)
+      if exists((DEBUG_KS)) then
+        print(using debug keystore (DEBUG_KS))
+      else then
+        "(KEYTOOL)" -genkeypair -keystore (DEBUG_KS) -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+      done
+    done
+    if changed(android-sign, (ALIGNED_APK), (APK), (_salt)-(_ks)-(KS_ALIAS)) then
+      "(BT_DIR)/apksigner(BAT)" sign --ks (_ks) --ks-key-alias (KS_ALIAS) --ks-pass pass:(KS_PASS) --key-pass pass:(KS_PASS) --out (APK) (ALIGNED_APK)
+    else
+      print(up to date: (APK))
+    done
+
+  apk: sign
+    print(Built (APK))
+
+  verify: apk
+    "(BT_DIR)/apksigner(BAT)" verify --verbose (APK)
+
+  install: apk
+    "(ADB)" install -r (APK)
+
+  run: install
+    "(ADB)" shell am start -n (PACKAGE)/(MAIN_ACTIVITY)
+
+  uninstall:
+    "(ADB)" uninstall (PACKAGE)
+
+  devices:
+    "(ADB)" devices -l
+
+  logcat:
+    "(ADB)" logcat
+
+  info:
+    print(package:      (PACKAGE))
+    print(variant:      (VARIANT))
+    print(sdk:          (ANDROID_SDK))
+    print(build-tools:  (BUILD_TOOLS))
+    print(android.jar:  (ANDROID_JAR))
+    print(min/target/compile sdk: (MIN_SDK)/(TARGET_SDK)/(COMPILE_SDK))
+    print(output:       (APK))
+
+  clean:
+    rm((BUILD_DIR))
+done
