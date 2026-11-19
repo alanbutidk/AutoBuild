@@ -231,6 +231,62 @@ See `autobuild --templates NAME` for the parameters of each one.
 
 ---
 
+# Autobuild LSP
+A standalone LSP for autobuild, speaks `semantic tokens` so your LSP can highlight it.
+
+It doesn't need `AutoBuild` as it already implements the `tokenizer and parser` engine (But needs _Python 3.8+_).
+
+## How to pair it into your editor
+I use `nvim`, specifically `astronvim` (`nvim 0.11.x`) and you implement it by:
+
+- Going to `~` (or `%LOCALAPPDATA%`)
+- Finding a folder named `nvim`
+- cd'ing into lua/plugins
+- Create a file: `ab-lsp.lua`
+- Pasting this code:
+
+```lua
+---@type LazySpec
+return {
+  {
+    "AstroNvim/astrocore",
+    opts = {
+      filetypes = {
+        extension = { abuild = "abuild" },
+        filename = { [".abuild"] = "abuild" },
+      },
+    },
+  },
+  {
+    "AstroNvim/astrolsp",
+    opts = {
+      servers = { "autobuild" }, -- tells astroLSP to start it.
+      config = {
+        autobuild = {
+          cmd = { "path/to/python/executable/with/forward/slashes/even/on/win", "path/to/autobuild_lsp.py/with/forward/slashes/even/on/win" },
+          filetypes = { "abuild" },
+          root_markers = { ".abuild", ".git" },
+          single_file_support = true,
+        },
+      },
+    },
+  },
+}
+
+```
+
+### I dont use nvim, how do i place it?
+
+For now, i am searching ways for various editors to run Autobuild-LSP, please wait till the steps arrive for your editor.
+
+---
+
+# Android-Build-For-ab
+
+This is a module that provides simple recipes to build and test your apps with autobuild.
+
+> NOTE: it is very limited and stuff that are advanced or networking related stuff like pulling `kotlinc` isnt supported.
+
 ## License
 
-GPL3, see `LICENSE`.
+GPL3, see [LICENSE](./LICENSE).
